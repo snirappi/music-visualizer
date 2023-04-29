@@ -4,7 +4,8 @@ use cpal::{traits::{HostTrait, DeviceTrait, StreamTrait}, Host, Device};
 use rustfft::{FftPlanner, num_complex::{Complex, ComplexFloat}};
 
 
-const BUFFER_SIZE : usize = 1024;
+const BUFFER_SIZE : usize = 512;
+const SMOOTHING : f32 = 0.5;
 pub fn playback(clip: Vec<f32>) -> Result<(), String>{
     let host: Host = cpal::default_host();
     let device: Device = host.default_output_device().expect("could not find default output device");
@@ -88,21 +89,27 @@ pub fn record(sender: Sender<f32>){
 
 pub fn process_audio(rx: Receiver<f32>, tx: Sender<Vec<f32>>){
     let mut i : usize = 0;
-    let mut buffer = vec![Complex{re: 0.0f32, im: 0.0f32}; BUFFER_SIZE];
+    let mut buffer = vec![Complex{re: 0.0f32, im: 0.0f32}; BUFFER_SIZE * 2];
     let mut planner = FftPlanner::new();
-    let fft = planner.plan_fft_forward(BUFFER_SIZE);
+    let fft = planner.plan_fft_forward(BUFFER_SIZE * 2);
     for recieved in rx {
         //handle recieved f32
         buffer[i] = recieved.into();
         i = i + 1;
         if i > buffer.len() - 1 {
             fft.process(& mut buffer);
-            let mut graph = vec![0.0; BUFFER_SIZE];
+            let mut graph1 = vec![0.0; BUFFER_SIZE];
+            let mut graph2 = vec![0.0; BUFFER_SIZE];
             for (i, freq) in buffer.iter().enumerate() {
-                graph[i] = make_freq_array(*freq);
+                if i < BUFFER_SIZE {
+                    graph1[i] = make_freq_array(*freq);
+                } else {
+                    graph2[i - BUFFER_SIZE] = make_freq_array(*freq);
+                }
             }
             i = 0;
-            tx.send(graph);
+
+            tx.send(smoothing(graph1, graph2, SMOOTHING));
         }
     }
 }
@@ -110,4 +117,16 @@ pub fn process_audio(rx: Receiver<f32>, tx: Sender<Vec<f32>>){
 fn make_freq_array(num: Complex<f32>) -> f32{
     let value = num.abs();
     return value;
+}
+
+// Smoothing param should be 1.0 - 0.0
+fn smoothing(graph1: Vec<f32>, graph2: Vec<f32>, smoothing: f32) -> Vec<f32>{
+    if graph1.len() != graph2.len() {
+        panic!("FFT Buffers not equal size for smoothing!");
+    }
+    let mut graph = vec![0.0; graph1.len()];
+    for (i, freq) in graph1.iter().enumerate() {
+       graph[i] = graph1[i] * smoothing + (1.0 - smoothing) * graph2[i];
+    }
+    graph
 }

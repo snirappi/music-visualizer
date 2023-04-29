@@ -5,8 +5,11 @@ mod audio;
 use crate::audio::{record, process_audio};
 mod scene;
 use crate::scene::*;
+
+const BUFFER_WINDOW: usize = 50;
 struct Model {
-    buffer: Receiver<Vec<f32>>
+    buffer: Receiver<Vec<f32>>,
+    particle: Particle,
 }
 
 fn model(_app: &App) -> Model {
@@ -19,21 +22,27 @@ fn model(_app: &App) -> Model {
         process_audio(audio_rx, video_tx);
     });
     Model {
-        buffer: video_rx
+        buffer: video_rx,
+        particle: Particle::NONE,
     }
 }
 
-fn update(_app: &App, _model: &mut Model, _update: Update){
-
+fn update(app: &App, _model: &mut Model, _update: Update){
+    if app.time as usize % 15 == 0 {
+        _model.particle = particle_selection();
+    }
 }
 
 fn view(app: &App, _model: &Model, frame: Frame) {
-    let fft_array = &_model.buffer.recv().unwrap()[256..768];
+    let recv_buffer = &_model.buffer.recv().unwrap();
+
+    let fft_array = &recv_buffer[BUFFER_WINDOW..recv_buffer.len() - BUFFER_WINDOW];
     let scene = Scene {
         app,
         draw: app.draw(),
         frame,
         sensitivity: Sensitivity::HIGH, 
+        particle: _model.particle,
     };
     scene.run(fft_array.to_vec());
 }

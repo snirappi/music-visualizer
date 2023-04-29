@@ -1,15 +1,42 @@
-use nannou::prelude::*;
+use std::sync::mpsc::Sender;
+
+use nannou::{
+    prelude::*,
+    rand::{self, distributions::Standard, prelude::Distribution},
+};
 
 pub enum Sensitivity {
     HIGH,
     MED,
     LOW,
 }
+
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
+pub enum Particle {
+    SQUARES,
+    CIRCLE,
+    DOTS,
+    EQLINES,
+    NONE,
+}
+
+impl Distribution<Particle> for Standard {
+    fn sample<R: nannou::rand::Rng + ?Sized>(&self, rng: &mut R) -> Particle {
+        match rng.gen_range(0..=3) {
+            0 => Particle::CIRCLE,
+            1 => Particle::SQUARES,
+            2 => Particle::DOTS,
+            3 => Particle::EQLINES,
+            _ => Particle::NONE,
+        }
+    }
+}
 pub struct Scene<'a> {
     pub app: &'a App,
     pub draw: Draw,
     pub frame: Frame<'a>,
     pub sensitivity: Sensitivity,
+    pub particle: Particle,
 }
 
 #[derive(Clone, Copy)]
@@ -24,10 +51,106 @@ struct EQ {
 }
 
 impl Scene<'_> {
-    fn draw_rainbow_squares(self: &Self, fft_array: Vec<f32>, eq: EQ) {
+    fn draw_lines(self: &Self, fft_array: Vec<f32>, eq: EQ) {
+        let fft_third = fft_array.len() / 3;
+        for i in 0..=2 {
+            match i {
+                0 => {
+                    let points = (0..fft_third)
+                        .map(|i| {
+                            let x = self.app.window_rect().left() + (100.0 * i as f32);
+                            let y = self.app.window_rect().bottom()
+                                + (self.app.window_rect().y() / 2.0)
+                                + (100.0 * fft_array[i]);
+                            pt2(x, y)
+                        })
+                        .enumerate()
+                        .map(|(i, p)| {
+                            let fract = (i / fft_third) as f32;
+                            let r = (self.app.time + fract) % 1.0;
+                            let g = (self.app.time - 1.0 - fract) % 1.0;
+                            let b = (self.app.time + 0.5 + fract) % 1.0;
+                            let rgba = srgba(r, g, b, eq.total_amp);
+                            (p, rgba)
+                        });
+                    self.draw
+                        .polyline()
+                        .weight(eq.bass_amp * 100.0)
+                        .points_colored(points);
+                }
+                1 => {
+                    let points = (fft_third..fft_third * 2)
+                        .map(|i| {
+                            let x =
+                                self.app.window_rect().left() + (100.0 * (i - fft_third) as f32);
+                            let y = self.app.window_rect().y() + (500.0 * fft_array[i]);
+                            pt2(x, y)
+                        })
+                        .enumerate()
+                        .map(|(i, p)| {
+                            let fract = (i / fft_third) as f32;
+                            let r = (self.app.time + fract) % 1.0;
+                            let g = (self.app.time - 1.0 - fract) % 1.0;
+                            let b = (self.app.time + 0.5 + fract) % 1.0;
+                            let rgba = srgba(r, g, b, eq.total_amp);
+                            (p, rgba)
+                        });
+                    self.draw
+                        .polyline()
+                        .weight(eq.mid_amp * 100.0)
+                        .points_colored(points);
+                }
+                2 => {
+                    let points = (fft_third * 2..fft_third * 3)
+                        .map(|i| {
+                            let x = self.app.window_rect().left()
+                                + (100.0 * (i - fft_third * 2) as f32);
+                            let y = self.app.window_rect().top() - (1000.0 * fft_array[i]);
+                            pt2(x, y)
+                        })
+                        .enumerate()
+                        .map(|(i, p)| {
+                            let fract = (i / fft_third) as f32;
+                            let r = (self.app.time + fract) % 1.0;
+                            let g = (self.app.time - 1.0 - fract) % 1.0;
+                            let b = (self.app.time + 0.5 + fract) % 1.0;
+                            let rgba = srgba(r, g, b, eq.total_amp);
+                            (p, rgba)
+                        });
+                    self.draw
+                        .polyline()
+                        .weight(eq.treb_amp * 100.0)
+                        .points_colored(points);
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn draw_dots(self: &Self, fft_array: Vec<f32>) {
         for i in -10..10 {
             for j in -10..10 {
-                if i > -5 && i < 5 || j > -5 && j < 5 {
+                let color_factor = fft_array[random_range(0, fft_array.len() - 1)];
+                let color_choice = i as f32 / 360.0;
+                let r = (self.app.time + color_choice) % 1.0;
+                let g = (self.app.time - color_choice) % 1.0;
+                let b = (self.app.time + 0.5 + color_choice) % 1.0;
+                let rgba = srgba(r, g, b, color_factor);
+                self.draw
+                    .ellipse()
+                    .radius(50.0 * color_factor)
+                    .x_y(i as f32 * 100.0, j as f32 * 100.0)
+                    .color(rgba);
+            }
+        }
+    }
+
+    fn draw_rainbow_squares(self: &Self, fft_array: Vec<f32>, eq: EQ) {
+        let separating_x = eq.total_amp > 1.0 && self.app.time.sin() % 1.0 > 0.7;
+        let separating_y = eq.total_amp > 1.0 && self.app.time.cos() % 1.0 > 0.7;
+        for i in -10..10 {
+            for j in -10..10 {
+                if (separating_x && i > -5 && i < 5) || (separating_y && j > -5 && j < 5) {
                     continue;
                 }
                 let color_factor = fft_array[random_range(0, fft_array.len() - 1)];
@@ -60,9 +183,9 @@ impl Scene<'_> {
                 let fft_val = fft_array[i + diff] as f32;
                 // Get the sine of the radian to find the x co-ordinate of this point of the circle
                 // and multiply it by the radius.
-                let x = radian.sin() * 1024.0 * fft_val;
+                let x = radian.sin() * (256.0 * fft_val + 100.0);
                 // Do the same with cosine to find the y co-ordinate.
-                let y = radian.cos() * 1024.0 * fft_val;
+                let y = radian.cos() * (256.0 * fft_val + 100.0);
                 // Construct and return a point object with a color.
                 pt2(x, y)
             })
@@ -92,7 +215,7 @@ impl Scene<'_> {
             self.draw.background().color(rgba);
         } else if eq.treb_amp > eq.treb_trigger {
             self.draw.background().color(rgba);
-        } else if random_range(0, 10) > random_range(0, 10) {
+        } else {
             self.draw.background().color(BLACK);
         }
     }
@@ -139,12 +262,18 @@ impl Scene<'_> {
     pub fn run(self: &Self, fft_array: Vec<f32>) {
         let eq = self.find_3eq(fft_array.clone());
         self.backgrounds(eq.clone());
-        if eq.treb_amp < eq.treb_trigger {
-            self.draw_rainbow_circle(fft_array.clone(), eq.clone());
-        }
-        if eq.mid_amp < eq.mid_trigger {
-            self.draw_rainbow_squares(fft_array.clone(), eq.clone());
+        match self.particle {
+            Particle::SQUARES => self.draw_rainbow_squares(fft_array.clone(), eq.clone()),
+            Particle::CIRCLE => self.draw_rainbow_circle(fft_array.clone(), eq.clone()),
+            Particle::DOTS => self.draw_dots(fft_array.clone()),
+            Particle::EQLINES => self.draw_lines(fft_array.clone(), eq.clone()),
+            Particle::NONE => {}
         }
         self.draw.to_frame(self.app, &self.frame).unwrap();
     }
+}
+
+pub fn particle_selection() -> Particle {
+    let random = nannou::rand::random::<Particle>();
+    return random;
 }
