@@ -17,16 +17,18 @@ pub enum Particle {
     CIRCLE,
     DOTS,
     EQLINES,
+    POLYGON,
     NONE,
 }
 
 impl Distribution<Particle> for Standard {
     fn sample<R: nannou::rand::Rng + ?Sized>(&self, rng: &mut R) -> Particle {
-        match rng.gen_range(0..=3) {
+        match rng.gen_range(0..=4) {
             0 => Particle::CIRCLE,
             1 => Particle::SQUARES,
             2 => Particle::DOTS,
             3 => Particle::EQLINES,
+            4 => Particle::POLYGON,
             _ => Particle::NONE,
         }
     }
@@ -37,6 +39,7 @@ pub struct Scene<'a> {
     pub frame: Frame<'a>,
     pub sensitivity: Sensitivity,
     pub particle: Particle,
+    pub particle2: Particle,
 }
 
 #[derive(Clone, Copy)]
@@ -83,7 +86,7 @@ impl Scene<'_> {
                         .map(|i| {
                             let x =
                                 self.app.window_rect().left() + (100.0 * (i - fft_third) as f32);
-                            let y = self.app.window_rect().y() + (500.0 * fft_array[i]);
+                            let y = (self.app.window_rect().y() - 50.0) + (1000.0 * fft_array[i]);
                             pt2(x, y)
                         })
                         .enumerate()
@@ -97,7 +100,7 @@ impl Scene<'_> {
                         });
                     self.draw
                         .polyline()
-                        .weight(eq.mid_amp * 100.0)
+                        .weight(eq.mid_amp * 500.0)
                         .points_colored(points);
                 }
                 2 => {
@@ -146,11 +149,9 @@ impl Scene<'_> {
     }
 
     fn draw_rainbow_squares(self: &Self, fft_array: Vec<f32>, eq: EQ) {
-        let separating_x = eq.total_amp > 1.0 && self.app.time.sin() % 1.0 > 0.7;
-        let separating_y = eq.total_amp > 1.0 && self.app.time.cos() % 1.0 > 0.7;
         for i in -10..10 {
             for j in -10..10 {
-                if (separating_x && i > -5 && i < 5) || (separating_y && j > -5 && j < 5) {
+                if (i > -5 && i < 5) || (j > -5 && j < 5) {
                     continue;
                 }
                 let color_factor = fft_array[random_range(0, fft_array.len() - 1)];
@@ -172,6 +173,24 @@ impl Scene<'_> {
             }
         }
     }
+    fn draw_polygon(self: &Self, fft_array: Vec<f32>, eq: EQ) {
+        let random = fft_array[random_range(0, fft_array.len() - 1)];
+        let radius = (random * 1000.0) + 100.0;
+        let points = (0..(random * 10.0) as usize + 8).map(|i| {
+            let fract = i as f32 / (random + 1.0);
+            let x = radius * fract.cos();
+            let y = radius * fract.sin();
+            let r = (self.app.time + fract) % 1.0;
+            let g: f32 = (self.app.time - 1.0 - fract) % 1.0;
+            let b = (self.app.time + 0.5 + fract) % 1.0;
+            (pt2(x, y), rgba(r, g, b, eq.total_amp))
+        });
+        self.draw
+            .polygon()
+            .stroke_weight(eq.total_amp * 5.0)
+            .rotate(random * eq.total_amp * 360.0 * self.app.time.sin())
+            .points_colored(points);
+    }
     fn draw_rainbow_circle(self: &Self, fft_array: Vec<f32>, eq: EQ) {
         // Map over an array of integers from 0 to 360 to represent the degrees in a circle.
         // get middle 360 points
@@ -179,13 +198,13 @@ impl Scene<'_> {
             .map(|i| {
                 // Convert each degree to radians.
                 let radian = deg_to_rad(i as f32);
-                let diff = fft_array.len() - 360;
+                let diff = (fft_array.len() / 2) - 180;
                 let fft_val = fft_array[i + diff] as f32;
                 // Get the sine of the radian to find the x co-ordinate of this point of the circle
                 // and multiply it by the radius.
-                let x = radian.sin() * (256.0 * fft_val + 100.0);
+                let x = radian.sin() * ((2046.0 * fft_val) + 100.0);
                 // Do the same with cosine to find the y co-ordinate.
-                let y = radian.cos() * (256.0 * fft_val + 100.0);
+                let y = radian.cos() * ((2046.0 * fft_val) + 100.0);
                 // Construct and return a point object with a color.
                 pt2(x, y)
             })
@@ -193,7 +212,7 @@ impl Scene<'_> {
             .map(|(i, p)| {
                 let fract = i as f32 / 360.0;
                 let r = (self.app.time + fract) % 1.0;
-                let g = (self.app.time - 1.0 - fract) % 1.0;
+                let g: f32 = (self.app.time - 1.0 - fract) % 1.0;
                 let b = (self.app.time + 0.5 + fract) % 1.0;
                 let rgba = srgba(r, g, b, random_range(0.3, 1.0));
                 (p, rgba)
@@ -259,16 +278,22 @@ impl Scene<'_> {
         };
     }
 
-    pub fn run(self: &Self, fft_array: Vec<f32>) {
-        let eq = self.find_3eq(fft_array.clone());
-        self.backgrounds(eq.clone());
-        match self.particle {
+    fn particle_draw(self: &Self, particle: Particle, fft_array: Vec<f32>, eq: EQ) {
+        match particle {
             Particle::SQUARES => self.draw_rainbow_squares(fft_array.clone(), eq.clone()),
             Particle::CIRCLE => self.draw_rainbow_circle(fft_array.clone(), eq.clone()),
             Particle::DOTS => self.draw_dots(fft_array.clone()),
             Particle::EQLINES => self.draw_lines(fft_array.clone(), eq.clone()),
+            Particle::POLYGON => self.draw_polygon(fft_array.clone(), eq.clone()),
             Particle::NONE => {}
         }
+    }
+
+    pub fn run(self: &Self, fft_array: Vec<f32>) {
+        let eq = self.find_3eq(fft_array.clone());
+        self.backgrounds(eq.clone());
+        self.particle_draw(self.particle, fft_array.clone(), eq.clone());
+        self.particle_draw(self.particle2, fft_array.clone(), eq.clone());
         self.draw.to_frame(self.app, &self.frame).unwrap();
     }
 }

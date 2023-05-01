@@ -9,7 +9,9 @@ use crate::scene::*;
 const BUFFER_WINDOW: usize = 50;
 struct Model {
     buffer: Receiver<Vec<f32>>,
+    transition_speed: Sensitivity,
     particle: Particle,
+    particle2: Particle,
 }
 
 fn model(_app: &App) -> Model {
@@ -23,18 +25,41 @@ fn model(_app: &App) -> Model {
     });
     Model {
         buffer: video_rx,
+        transition_speed: Sensitivity::MED,
         particle: Particle::NONE,
+        particle2: Particle::NONE,
     }
 }
 
-fn update(app: &App, _model: &mut Model, _update: Update){
-    if app.time as usize % 15 == 0 {
-        _model.particle = particle_selection();
+fn update(app: &App, model: &mut Model, update: Update){
+    let mut main_particle_speed = 0;
+    let mut secondary_particle_speed = 0;
+    match model.transition_speed {
+        Sensitivity::HIGH => {
+            main_particle_speed = 15;
+            secondary_particle_speed = 2;
+        },
+        Sensitivity::MED => {
+            main_particle_speed = 30;
+            secondary_particle_speed = 8;
+        },
+        Sensitivity::LOW => {
+            main_particle_speed = 60;
+            secondary_particle_speed = 15;
+        },
+    };
+    if app.time as usize % main_particle_speed == 0 {
+        model.particle = particle_selection();
+    }
+    if app.time as usize % secondary_particle_speed == 0 {
+        model.particle2 = particle_selection();
+    } else {
+        model.particle2 = Particle::NONE;
     }
 }
 
-fn view(app: &App, _model: &Model, frame: Frame) {
-    let recv_buffer = &_model.buffer.recv().unwrap();
+fn view(app: &App, model: &Model, frame: Frame) {
+    let recv_buffer = &model.buffer.recv().unwrap();
 
     let fft_array = &recv_buffer[BUFFER_WINDOW..recv_buffer.len() - BUFFER_WINDOW];
     let scene = Scene {
@@ -42,7 +67,8 @@ fn view(app: &App, _model: &Model, frame: Frame) {
         draw: app.draw(),
         frame,
         sensitivity: Sensitivity::HIGH, 
-        particle: _model.particle,
+        particle: model.particle,
+        particle2: model.particle2,
     };
     scene.run(fft_array.to_vec());
 }
