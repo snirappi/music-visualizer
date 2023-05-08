@@ -40,6 +40,7 @@ pub struct Scene<'a> {
     pub sensitivity: Sensitivity,
     pub particle: Particle,
     pub particle2: Particle,
+    pub pause_frames: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -291,7 +292,9 @@ impl Scene<'_> {
 
     pub fn run(self: &Self, fft_array: Vec<f32>) {
         let eq = self.find_3eq(fft_array.clone());
-        self.backgrounds(eq.clone());
+        if self.pause_frames == 0 {
+            self.backgrounds(eq.clone());
+        }
         self.particle_draw(self.particle, fft_array.clone(), eq.clone());
         self.particle_draw(self.particle2, fft_array.clone(), eq.clone());
         self.draw.to_frame(self.app, &self.frame).unwrap();
